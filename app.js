@@ -276,6 +276,7 @@
   function normalizeText(text) {
     const normalized = String(text || "")
       .replace(/\r/g, "\n")
+      .replace(/\[\[(IMG|TABLE)\.\s*/g, "[[$1:")
       .replace(/EMBED\s+Equation\.3/gi, "[公式]")
       .replace(/[□�]{2,}/g, "[公式]")
       .replace(/[□�]/g, "")
