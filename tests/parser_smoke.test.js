@@ -57,4 +57,23 @@ assert.deepStrictEqual(pollutedFormulaImageOptions.options.map((item) => item.ke
 assert.strictEqual(pollutedFormulaImageOptions.options[2].text, "[[IMG:19x20:data:image/png;base64,AAAA]]");
 assert.strictEqual(pollutedFormulaImageOptions.options[3].text, "[[IMG:41x20:data:image/png;base64,BBBB]]");
 
+const prefixedOptions = firstQuestion(
+  "知识点：1 难易度：容易认知度：识记\nMCS-51单片机CPU的主要组成部分为( )\n选项A）运算器、控制器\n选项B）加法器、寄存器\n选项C）运算器、加法器\n选项D）运算器、译码器\n答案：A"
+);
+assert.strictEqual(prefixedOptions.stem, "MCS-51单片机CPU的主要组成部分为（ ）");
+assert.deepStrictEqual(prefixedOptions.options.map((item) => item.key), ["A", "B", "C", "D"]);
+assert.deepStrictEqual(prefixedOptions.options.map((item) => item.text), [
+  "运算器、控制器",
+  "加法器、寄存器",
+  "运算器、加法器",
+  "运算器、译码器"
+]);
+
+const largeImageToken = `[[IMG:907x500:data:image/jpeg;base64,${"A".repeat(130000)}]]`;
+const largeImageQuestion = firstQuestion(
+  `如下图所示，为51系列单片机的并行口的哪一类( )\n${largeImageToken}\n选项A）P0\n选项B）P1\n选项C）P2\n选项D）P3\n答案：A`
+);
+assert.strictEqual(largeImageQuestion.stem.includes("[[IMG:907x500:data:image/jpeg;base64,"), true);
+assert.deepStrictEqual(largeImageQuestion.options.map((item) => item.key), ["A", "B", "C", "D"]);
+
 console.log("parser smoke ok");

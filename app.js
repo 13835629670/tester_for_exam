@@ -284,6 +284,7 @@
       .replace(/答案\s*[:：]/g, "答案：");
 
     return withRichTokensProtected(normalized, (value) => value
+      .replace(/选项\s*([A-HＡ-Ｈ])\s*[）).．、:：]\s*/g, (_, key) => `${normalizeOptionKey(key)}. `)
       .replace(answerLeakBeforeOptionListPattern(), (_, open, close) => `${open} ${close}`)
       .replace(optionMarkerPattern(), (...args) => normalizeOptionMarkerMatch(args)))
       .replace(/\n{2,}/g, "\n")
@@ -459,7 +460,8 @@
   function isSuspiciousBlock(block) {
     const text = String(block || "");
     const imageCount = (text.match(/\[\[IMG:/g) || []).length;
-    if (text.length > 120000) return true;
+    const visibleText = text.replace(/\[\[(?:IMG|TABLE):[\s\S]*?\]\]/g, "[media]");
+    if (visibleText.length > 120000) return true;
     if (imageCount > 12) return true;
     return false;
   }
@@ -683,6 +685,7 @@
 
   function cleanupStem(value) {
     return String(value || "")
+      .replace(/^\s*知识点\s*[:：]\s*\S+\s*难易度\s*[:：]\s*\S+\s*认知度\s*[:：]\s*\S+\s*/, "")
       .replace(/^\s*难度\s*[:：]?\s*\S+\s*/, "")
       .replace(/^\s*\d+\s*[、.．)]\s*/, "")
       .replace(/\s+/g, " ")
