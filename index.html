@@ -50,6 +50,18 @@
         </div>
         <div id="importedList" class="imported-list"></div>
       </section>
+
+      <section class="panel">
+        <div class="panel-head">
+          <h2>数据缓存</h2>
+          <span class="muted">JSON</span>
+        </div>
+        <div class="create-row">
+          <button id="exportCacheBtn" type="button">导出缓存</button>
+          <button id="importCacheBtn" type="button">导入缓存</button>
+          <input id="importCacheInput" type="file" accept=".json" hidden>
+        </div>
+      </section>
     </aside>
 
     <section class="workspace">
@@ -80,6 +92,9 @@
             <button type="button" data-practice-mode="judge">判断</button>
           </div>
           <div class="toolbar-actions">
+            <input id="jumpInput" type="number" min="1" placeholder="题号" aria-label="跳转题号">
+            <button id="jumpBtn" type="button">跳题</button>
+            <button id="clearProgressBtn" type="button">清除进度</button>
             <button id="shufflePracticeBtn" type="button">乱序练习</button>
             <button id="resetPracticeBtn" type="button">顺序练习</button>
           </div>
@@ -119,6 +134,6 @@
   </template>
 
   <script src="https://cdn.jsdelivr.net/npm/mammoth@1.8.0/mammoth.browser.min.js"></script>
-  <script src="./app.js?v=20260626-prefixed-options" defer></script>
+  <script src="./app.js?v=20260626-cache" defer></script>
 </body>
 </html>

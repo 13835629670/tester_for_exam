@@ -437,6 +437,11 @@ textarea:focus {
   gap: 8px;
 }
 
+.toolbar-actions input {
+  width: 72px;
+  text-align: center;
+}
+
 .content-area {
   display: grid;
   gap: 14px;

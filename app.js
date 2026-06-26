@@ -1,5 +1,47 @@
 (function () {
   const hasDom = typeof document !== "undefined";
+  const CACHE_KEY = "quiz-state";
+  const cacheStore = {
+    dbName: "QuizMemoryTool",
+    storeName: "state",
+    async open() {
+      if (!hasDom || typeof indexedDB === "undefined") return null;
+      return new Promise((resolve, reject) => {
+        const request = indexedDB.open(this.dbName, 1);
+        request.onupgradeneeded = () => {
+          request.result.createObjectStore(this.storeName);
+        };
+        request.onsuccess = () => resolve(request.result);
+        request.onerror = () => reject(request.error);
+      });
+    },
+    async save(value) {
+      const db = await this.open();
+      if (!db) return;
+      await new Promise((resolve, reject) => {
+        const tx = db.transaction(this.storeName, "readwrite");
+        tx.objectStore(this.storeName).put(value, CACHE_KEY);
+        tx.oncomplete = resolve;
+        tx.onerror = () => reject(tx.error);
+      });
+      db.close();
+    },
+    async load() {
+      const db = await this.open();
+      if (!db) return null;
+      const value = await new Promise((resolve, reject) => {
+        const tx = db.transaction(this.storeName, "readonly");
+        const request = tx.objectStore(this.storeName).get(CACHE_KEY);
+        request.onsuccess = () => resolve(request.result || null);
+        request.onerror = () => reject(request.error);
+      });
+      db.close();
+      return value;
+    }
+  };
+
+  let cacheReady = false;
+  let saveTimer = null;
   const state = {
     subjects: [],
     activeSubjectId: null,
@@ -28,9 +70,15 @@
     practiceArea: document.getElementById("practiceArea"),
     wrongArea: document.getElementById("wrongArea"),
     previewArea: document.getElementById("previewArea"),
+    jumpInput: document.getElementById("jumpInput"),
+    jumpBtn: document.getElementById("jumpBtn"),
+    clearProgressBtn: document.getElementById("clearProgressBtn"),
     shufflePracticeBtn: document.getElementById("shufflePracticeBtn"),
     resetPracticeBtn: document.getElementById("resetPracticeBtn"),
-    clearWrongBtn: document.getElementById("clearWrongBtn")
+    clearWrongBtn: document.getElementById("clearWrongBtn"),
+    exportCacheBtn: document.getElementById("exportCacheBtn"),
+    importCacheBtn: document.getElementById("importCacheBtn"),
+    importCacheInput: document.getElementById("importCacheInput")
   } : {};
 
   const typeLabels = {
@@ -40,10 +88,24 @@
 
   if (hasDom) init();
 
-  function init() {
+  async function init() {
     bindEvents();
     renderServerHint();
-    createSubject("默认科目");
+    try {
+      const saved = await cacheStore.load();
+      if (saved) {
+        applySerializedState(saved);
+      }
+    } catch (error) {
+      console.warn("读取缓存失败：", error);
+      logImport("本地缓存读取失败，可重新导入题库。", "warn");
+    }
+    if (!state.subjects.length) {
+      createSubject("默认科目");
+    } else {
+      resetPractice(false);
+    }
+    cacheReady = true;
     render();
   }
 
@@ -59,6 +121,15 @@
   }
 
   function bindEvents() {
+    if (els.exportCacheBtn) {
+      els.exportCacheBtn.addEventListener("click", exportCacheFile);
+    }
+
+    if (els.importCacheBtn && els.importCacheInput) {
+      els.importCacheBtn.addEventListener("click", () => els.importCacheInput.click());
+      els.importCacheInput.addEventListener("change", importCacheFile);
+    }
+
     els.addSubjectBtn.addEventListener("click", () => {
       const name = els.subjectInput.value.trim();
       if (!name) {
@@ -111,6 +182,33 @@
       renderPractice();
     });
 
+    if (els.jumpBtn && els.jumpInput) {
+      els.jumpBtn.addEventListener("click", () => {
+        const value = Number.parseInt(els.jumpInput.value, 10);
+        if (!Number.isInteger(value) || value < 1 || value > state.practiceOrder.length) {
+          logImport(`请输入 1 到 ${state.practiceOrder.length || 1} 之间的题号。`, "warn");
+          els.jumpInput.value = "";
+          return;
+        }
+        updatePracticeIndex(value - 1);
+        els.jumpInput.value = "";
+        renderPractice();
+      });
+      els.jumpInput.addEventListener("keydown", (event) => {
+        if (event.key === "Enter") els.jumpBtn.click();
+      });
+    }
+
+    if (els.clearProgressBtn) {
+      els.clearProgressBtn.addEventListener("click", () => {
+        const subject = getActiveSubject();
+        if (!subject) return;
+        subject.practiceProgress = createPracticeProgress();
+        updatePracticeIndex(0);
+        renderPractice();
+      });
+    }
+
     els.clearWrongBtn.addEventListener("click", () => {
       const subject = getActiveSubject();
       if (!subject) return;
@@ -126,11 +224,16 @@
       questions: [],
       imports: [],
       wrongIds: new Set(),
-      answered: new Map()
+      answered: new Map(),
+      practiceProgress: createPracticeProgress()
     };
     state.subjects.push(subject);
     state.activeSubjectId = subject.id;
     resetPractice(false);
+  }
+
+  function createPracticeProgress() {
+    return { all: 0, single: 0, judge: 0 };
   }
 
   function createId() {
@@ -139,6 +242,119 @@
 
   function getActiveSubject() {
     return state.subjects.find((subject) => subject.id === state.activeSubjectId) || null;
+  }
+
+  function scheduleSave() {
+    if (!cacheReady) return;
+    if (saveTimer) clearTimeout(saveTimer);
+    saveTimer = setTimeout(() => {
+      cacheStore.save(serializeState())
+        .catch((error) => {
+          console.warn("保存缓存失败：", error);
+          logImport("本地缓存保存失败，可使用导出缓存手动备份。", "warn");
+        });
+    }, 300);
+  }
+
+  function serializeState() {
+    return {
+      version: 1,
+      exportedAt: new Date().toISOString(),
+      subjects: state.subjects.map((subject) => ({
+        ...subject,
+        wrongIds: Array.from(subject.wrongIds || []),
+        answered: Array.from((subject.answered || new Map()).entries()),
+        practiceProgress: normalizePracticeProgress(subject.practiceProgress)
+      })),
+      activeSubjectId: state.activeSubjectId,
+      activeView: state.activeView,
+      practiceMode: state.practiceMode,
+      practiceOrder: Array.isArray(state.practiceOrder) ? state.practiceOrder : [],
+      practiceIndex: state.practiceIndex,
+      previewFilter: state.previewFilter
+    };
+  }
+
+  function applySerializedState(value) {
+    const next = hydrateState(value);
+    Object.assign(state, next);
+  }
+
+  function hydrateState(value) {
+    if (!value || !Array.isArray(value.subjects)) {
+      throw new Error("缓存文件格式不正确。");
+    }
+    const subjects = value.subjects.map((subject) => ({
+      id: String(subject.id || createId()),
+      name: String(subject.name || "未命名科目"),
+      questions: Array.isArray(subject.questions) ? subject.questions : [],
+      imports: Array.isArray(subject.imports) ? subject.imports : [],
+      wrongIds: new Set(Array.isArray(subject.wrongIds) ? subject.wrongIds : []),
+      answered: new Map(normalizeEntries(subject.answered)),
+      practiceProgress: normalizePracticeProgress(subject.practiceProgress)
+    }));
+    const activeSubjectId = subjects.some((subject) => subject.id === value.activeSubjectId)
+      ? value.activeSubjectId
+      : (subjects[0] ? subjects[0].id : null);
+    return {
+      subjects,
+      activeSubjectId,
+      activeView: ["practice", "wrong", "preview"].includes(value.activeView) ? value.activeView : "practice",
+      practiceMode: ["all", "single", "judge"].includes(value.practiceMode) ? value.practiceMode : "all",
+      practiceOrder: Array.isArray(value.practiceOrder) ? value.practiceOrder : [],
+      practiceIndex: Number.isInteger(value.practiceIndex) && value.practiceIndex >= 0 ? value.practiceIndex : 0,
+      previewFilter: ["all", "single", "judge"].includes(value.previewFilter) ? value.previewFilter : "all"
+    };
+  }
+
+  function normalizePracticeProgress(value) {
+    const progress = createPracticeProgress();
+    if (!value || typeof value !== "object") return progress;
+    for (const key of Object.keys(progress)) {
+      const index = Number(value[key]);
+      progress[key] = Number.isInteger(index) && index >= 0 ? index : 0;
+    }
+    return progress;
+  }
+
+  function normalizeEntries(value) {
+    if (!Array.isArray(value)) return [];
+    return value.filter((entry) => Array.isArray(entry) && entry.length >= 2);
+  }
+
+  function exportCacheFile() {
+    const blob = new Blob([JSON.stringify(serializeState(), null, 2)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `quiz-cache-${new Date().toISOString().slice(0, 10)}.json`;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(url);
+    logImport("缓存已导出。", "ok");
+  }
+
+  function importCacheFile(event) {
+    const file = event.target.files && event.target.files[0];
+    event.target.value = "";
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = async () => {
+      try {
+        const parsed = JSON.parse(String(reader.result || ""));
+        applySerializedState(parsed);
+        cacheReady = true;
+        await cacheStore.save(serializeState());
+        resetPractice(false);
+        render();
+        logImport(`${file.name} 导入成功。`, "ok");
+      } catch (error) {
+        logImport(`缓存导入失败：${error.message}`, "error");
+      }
+    };
+    reader.onerror = () => logImport("缓存文件读取失败。", "error");
+    reader.readAsText(file);
   }
 
   async function handleFiles(event) {
@@ -722,6 +938,7 @@
     renderHeader();
     renderTabs();
     renderCurrentView();
+    scheduleSave();
   }
 
   function renderSubjects() {
@@ -834,8 +1051,25 @@
     const subject = getActiveSubject();
     const questions = filterQuestions(subject ? subject.questions : [], state.practiceMode);
     state.practiceOrder = questions.map((question) => question.id);
-    if (shuffle) shuffleArray(state.practiceOrder);
-    state.practiceIndex = 0;
+    if (shuffle) {
+      shuffleArray(state.practiceOrder);
+      updatePracticeIndex(0, false);
+      return;
+    }
+    const savedIndex = subject && subject.practiceProgress
+      ? subject.practiceProgress[state.practiceMode] || 0
+      : 0;
+    updatePracticeIndex(Math.min(savedIndex, Math.max(0, state.practiceOrder.length - 1)), false);
+  }
+
+  function updatePracticeIndex(index, save = true) {
+    const subject = getActiveSubject();
+    state.practiceIndex = Math.max(0, index);
+    if (subject) {
+      subject.practiceProgress = normalizePracticeProgress(subject.practiceProgress);
+      subject.practiceProgress[state.practiceMode] = state.practiceIndex;
+    }
+    if (save) scheduleSave();
   }
 
   function renderPractice() {
@@ -900,6 +1134,7 @@
           : `<strong>回答错误。</strong>正确答案：${escapeHtml(question.answer)}`;
         answerPanel.classList.add("show");
         renderHeader();
+        scheduleSave();
       });
       optionArea.appendChild(button);
     }
@@ -915,7 +1150,7 @@
     prevBtn.textContent = "上一题";
     prevBtn.disabled = state.practiceIndex === 0;
     prevBtn.addEventListener("click", () => {
-      state.practiceIndex = Math.max(0, state.practiceIndex - 1);
+      updatePracticeIndex(Math.max(0, state.practiceIndex - 1));
       renderPractice();
     });
 
@@ -924,7 +1159,7 @@
     nextBtn.textContent = "下一题";
     nextBtn.disabled = state.practiceIndex >= state.practiceOrder.length - 1;
     nextBtn.addEventListener("click", () => {
-      state.practiceIndex = Math.min(state.practiceOrder.length - 1, state.practiceIndex + 1);
+      updatePracticeIndex(Math.min(state.practiceOrder.length - 1, state.practiceIndex + 1));
       renderPractice();
     });
 
@@ -1106,7 +1341,9 @@
       cleanQuestionStem,
       stripAnswerLeakBeforeOptions,
       parseImagePayload,
-      withRichTokensProtected
+      withRichTokensProtected,
+      hydrateState,
+      normalizePracticeProgress
     };
   }
 })();
