@@ -42,4 +42,12 @@ const realStemNotation = firstQuestion(
 assert.strictEqual(realStemNotation.stem, "这里的记号(A)只是题干内容，不是选项。真正空为（ ）");
 assert.deepStrictEqual(realStemNotation.options.map((item) => item.key), ["A", "B", "C", "D"]);
 
+const formulaImageOptions = firstQuestion(
+  "5、n个变量可构成的最小项的个数为：（ ）A、n B、2n C、[[IMG:19x20:data:image/png;base64,AAAA]] D、[[IMG:41x20:data:image/png;base64,BBBB]]答案：C"
+);
+assert.strictEqual(formulaImageOptions.stem, "n个变量可构成的最小项的个数为：（ ）");
+assert.deepStrictEqual(formulaImageOptions.options.map((item) => item.key), ["A", "B", "C", "D"]);
+assert.strictEqual(formulaImageOptions.options[2].text, "[[IMG:19x20:data:image/png;base64,AAAA]]");
+assert.strictEqual(formulaImageOptions.options[3].text, "[[IMG:41x20:data:image/png;base64,BBBB]]");
+
 console.log("parser smoke ok");

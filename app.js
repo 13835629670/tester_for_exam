@@ -274,17 +274,29 @@
   }
 
   function normalizeText(text) {
-    return String(text || "")
+    const normalized = String(text || "")
       .replace(/\r/g, "\n")
       .replace(/EMBED\s+Equation\.3/gi, "[公式]")
       .replace(/[□�]{2,}/g, "[公式]")
       .replace(/[□�]/g, "")
       .replace(/[ \t]+/g, " ")
-      .replace(/答案\s*[:：]/g, "答案：")
+      .replace(/答案\s*[:：]/g, "答案：");
+
+    return withRichTokensProtected(normalized, (value) => value
       .replace(answerLeakBeforeOptionListPattern(), (_, open, close) => `${open} ${close}`)
-      .replace(optionMarkerPattern(), (...args) => normalizeOptionMarkerMatch(args))
+      .replace(optionMarkerPattern(), (...args) => normalizeOptionMarkerMatch(args)))
       .replace(/\n{2,}/g, "\n")
       .trim();
+  }
+
+  function withRichTokensProtected(value, transform) {
+    const tokens = [];
+    const protectedValue = String(value || "").replace(/\[\[(?:IMG|TABLE):[\s\S]*?\]\]/g, (token) => {
+      const placeholder = `\uE000${tokens.length}\uE000`;
+      tokens.push(token);
+      return placeholder;
+    });
+    return transform(protectedValue).replace(/\uE000(\d+)\uE000/g, (_, index) => tokens[Number(index)] || "");
   }
 
   function splitSections(text) {
@@ -1089,7 +1101,8 @@
       parseOptions,
       cleanQuestionStem,
       stripAnswerLeakBeforeOptions,
-      parseImagePayload
+      parseImagePayload,
+      withRichTokensProtected
     };
   }
 })();
