@@ -1,0 +1,124 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>刷题记忆工具</title>
+  <link rel="stylesheet" href="./styles.css">
+</head>
+<body>
+  <main class="app-shell">
+    <aside class="sidebar">
+      <div class="brand">
+        <span class="brand-mark">T</span>
+        <div>
+          <h1>刷题记忆工具</h1>
+          <p>单选、判断、错题复习</p>
+        </div>
+      </div>
+
+      <section class="panel">
+        <div class="panel-head">
+          <h2>科目</h2>
+          <span id="subjectCount" class="muted">0 个</span>
+        </div>
+        <div class="create-row">
+          <input id="subjectInput" type="text" placeholder="新科目名称">
+          <button id="addSubjectBtn" type="button">添加</button>
+        </div>
+        <div id="subjectList" class="subject-list" aria-label="科目列表"></div>
+      </section>
+
+      <section class="panel">
+        <div class="panel-head">
+          <h2>导入题库</h2>
+          <span class="muted">docx / doc</span>
+        </div>
+        <label class="upload-box">
+          <input id="fileInput" type="file" multiple accept=".docx,.doc">
+          <span>选择文件</span>
+          <small>仅支持单选题和判断题</small>
+        </label>
+        <p id="serverHint" class="server-hint"></p>
+        <div id="importLog" class="import-log"></div>
+      </section>
+
+      <section class="panel">
+        <div class="panel-head">
+          <h2>已导入文件</h2>
+          <span id="importedCount" class="muted">0 个</span>
+        </div>
+        <div id="importedList" class="imported-list"></div>
+      </section>
+    </aside>
+
+    <section class="workspace">
+      <header class="topbar">
+        <div>
+          <p class="eyebrow">当前科目</p>
+          <h2 id="activeSubjectName">未选择</h2>
+        </div>
+        <div id="stats" class="stats"></div>
+      </header>
+
+      <nav class="tabs" aria-label="功能">
+        <button class="tab active" type="button" data-view="practice">练习</button>
+        <button class="tab" type="button" data-view="wrong">错题本</button>
+        <button class="tab" type="button" data-view="preview">全部预览</button>
+      </nav>
+
+      <section id="emptyState" class="empty-state">
+        <h2>先创建科目，再上传题库</h2>
+        <p>支持从 docx / doc 中识别单选题和判断题，题目需包含“答案：”。</p>
+      </section>
+
+      <section id="practiceView" class="view active">
+        <div class="toolbar">
+          <div class="segmented">
+            <button class="active" type="button" data-practice-mode="all">全部</button>
+            <button type="button" data-practice-mode="single">单选</button>
+            <button type="button" data-practice-mode="judge">判断</button>
+          </div>
+          <div class="toolbar-actions">
+            <button id="shufflePracticeBtn" type="button">乱序练习</button>
+            <button id="resetPracticeBtn" type="button">顺序练习</button>
+          </div>
+        </div>
+        <div id="practiceArea" class="content-area"></div>
+      </section>
+
+      <section id="wrongView" class="view">
+        <div class="toolbar">
+          <h3>错题本</h3>
+          <button id="clearWrongBtn" type="button">清空错题</button>
+        </div>
+        <div id="wrongArea" class="content-area"></div>
+      </section>
+
+      <section id="previewView" class="view">
+        <div class="toolbar">
+          <h3>全部预览</h3>
+          <div class="segmented">
+            <button class="active" type="button" data-preview-filter="all">全部</button>
+            <button type="button" data-preview-filter="single">单选</button>
+            <button type="button" data-preview-filter="judge">判断</button>
+          </div>
+        </div>
+        <div id="previewArea" class="content-area"></div>
+      </section>
+    </section>
+  </main>
+
+  <template id="questionTemplate">
+    <article class="question-card">
+      <div class="question-meta"></div>
+      <h3></h3>
+      <div class="options"></div>
+      <div class="answer-panel"></div>
+    </article>
+  </template>
+
+  <script src="https://cdn.jsdelivr.net/npm/mammoth@1.8.0/mammoth.browser.min.js"></script>
+  <script src="./app.js" defer></script>
+</body>
+</html>
