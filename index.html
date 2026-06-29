@@ -37,7 +37,7 @@
         <label class="upload-box">
           <input id="fileInput" type="file" multiple accept=".docx,.doc">
           <span>选择文件</span>
-          <small>仅支持单选题和判断题</small>
+          <small>支持单片机单选、判断题库</small>
         </label>
         <p id="serverHint" class="server-hint"></p>
         <div id="importLog" class="import-log"></div>
@@ -75,13 +75,14 @@
 
       <nav class="tabs" aria-label="功能">
         <button class="tab active" type="button" data-view="practice">练习</button>
+        <button class="tab" type="button" data-view="exam">单片机模拟考试</button>
         <button class="tab" type="button" data-view="wrong">错题本</button>
         <button class="tab" type="button" data-view="preview">全部预览</button>
       </nav>
 
       <section id="emptyState" class="empty-state">
         <h2>先创建科目，再上传题库</h2>
-        <p>支持从 docx / doc 中识别单选题和判断题，题目需包含“答案：”。</p>
+        <p>支持从 docx / doc 中识别单片机单选和判断题，题目需包含“答案：”。</p>
       </section>
 
       <section id="practiceView" class="view active">
@@ -110,6 +111,21 @@
         <div id="wrongArea" class="content-area"></div>
       </section>
 
+      <section id="examView" class="view">
+        <div class="toolbar">
+          <div>
+            <h3>单片机模拟考试</h3>
+            <p class="exam-note">备注：可不选视为 0 分。</p>
+            <div id="examSummary" class="exam-summary"></div>
+          </div>
+          <div class="toolbar-actions">
+            <button id="generateExamBtn" type="button">生成模拟卷</button>
+            <button id="submitExamBtn" type="button">交卷算分</button>
+          </div>
+        </div>
+        <div id="examArea" class="content-area"></div>
+      </section>
+
       <section id="previewView" class="view">
         <div class="toolbar">
           <h3>全部预览</h3>
@@ -134,6 +150,6 @@
   </template>
 
   <script src="https://cdn.jsdelivr.net/npm/mammoth@1.8.0/mammoth.browser.min.js"></script>
-  <script src="./app.js?v=20260626-cache" defer></script>
+  <script src="./app.js?v=20260629-mcu-exam" defer></script>
 </body>
 </html>

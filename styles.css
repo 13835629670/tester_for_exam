@@ -447,6 +447,46 @@ textarea:focus {
   gap: 14px;
 }
 
+.exam-summary {
+  margin-top: 6px;
+  color: var(--muted);
+  font-size: 14px;
+}
+
+.exam-note {
+  margin: 4px 0 0;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.exam-summary p {
+  margin: 4px 0 0;
+}
+
+.exam-warning {
+  color: var(--danger);
+}
+
+.exam-section {
+  display: grid;
+  gap: 12px;
+}
+
+.exam-section h3 {
+  margin: 8px 0 0;
+  font-size: 18px;
+}
+
+.exam-options .exam-option {
+  display: grid;
+  grid-template-columns: auto auto minmax(0, 1fr);
+}
+
+.exam-option input {
+  width: auto;
+  min-height: 0;
+}
+
 .question-card {
   padding: 18px;
   border: 1px solid var(--line);
