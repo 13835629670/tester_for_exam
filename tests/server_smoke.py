@@ -79,6 +79,42 @@ def test_pillow_warning_payload() -> None:
         server.PILLOW_WARNING = old_warning
 
 
+def test_pdf_dependency_message() -> None:
+    if server.fitz is not None:
+        return
+    old_convert = server.convert_with_word
+    old_extract_docx = server.extract_docx_text
+    try:
+        def fake_convert(source, target, file_format):
+            target.write_text("fake", encoding="utf-8")
+
+        server.convert_with_word = fake_convert
+        server.extract_docx_text = lambda path: "pdf text"
+        text, method = server.extract_pdf_text(Path("sample.pdf"))
+        assert text == "pdf text"
+        assert method == "pdf-word-docx-with-images"
+    finally:
+        server.convert_with_word = old_convert
+        server.extract_docx_text = old_extract_docx
+
+
+def test_pdf_text_normalization() -> None:
+    text = server.normalize_pdf_text(
+        "\n".join([
+            "20、生产关系范畴反映的是（C",
+            "）",
+            "A 人与自然之间的关系 B 人与人之间的政治关系",
+            "C 人与人之间的经济关系 D 人与人之间的思想关系 21 先进生产力的集中体现是（A ）",
+            "A 科学技术 B 劳动对象 C 劳动者 D 管理方式",
+        ])
+    )
+    assert "20、生产关系范畴反映的是（C ）" in text
+    assert "A. 人与自然之间的关系 B. 人与人之间的政治关系" in text
+    assert "\n21、先进生产力的集中体现是（A ）" in text
+    assert "A. 科学技术 B. 劳动对象 C. 劳动者 D. 管理方式" in text
+    assert server.normalize_pdf_text("A B C 0 0 1 1") == "A B C 0 0 1 1"
+
+
 def main() -> None:
     with tempfile.TemporaryDirectory() as temp_dir:
         docx_path = Path(temp_dir) / "sample.docx"
@@ -90,6 +126,8 @@ def main() -> None:
     test_path_containment()
     test_word_script_settings()
     test_pillow_warning_payload()
+    test_pdf_dependency_message()
+    test_pdf_text_normalization()
     source = (PROJECT_ROOT / "server.py").read_text(encoding="utf-8")
     assert "import cgi" not in source
     assert "dir=ROOT" not in source

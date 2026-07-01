@@ -487,6 +487,48 @@ textarea:focus {
   min-height: 0;
 }
 
+.exam-entry-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 12px;
+  margin: -4px 0 16px;
+}
+
+.exam-builder {
+  padding: 14px 0;
+  border-top: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+}
+
+.exam-builder h3 {
+  margin: 0;
+  font-size: 18px;
+}
+
+.exam-builder-grid {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: end;
+  gap: 10px;
+  margin-top: 10px;
+}
+
+.exam-builder-actions {
+  margin-top: 10px;
+}
+
+.exam-builder-grid label {
+  display: grid;
+  gap: 4px;
+  min-width: 92px;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.exam-builder-grid input {
+  width: 92px;
+}
+
 .question-card {
   padding: 18px;
   border: 1px solid var(--line);
@@ -507,6 +549,8 @@ textarea:focus {
 .question-card h3 {
   font-size: 18px;
   line-height: 1.55;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
 }
 
 .inline-formula {
@@ -532,6 +576,24 @@ textarea:focus {
 
 .option-btn .inline-figure {
   max-height: 240px;
+}
+
+.self-answer-input {
+  width: 100%;
+  min-height: 72px;
+  resize: vertical;
+  text-align: left;
+}
+
+.self-check-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.self-check-actions .option-btn {
+  width: auto;
+  min-width: 120px;
 }
 
 .inline-table-wrap {
@@ -615,6 +677,27 @@ textarea:focus {
   padding-top: 3px;
 }
 
+.option-btn.multi-option {
+  grid-template-columns: auto 32px minmax(0, 1fr);
+}
+
+.option-btn.multi-option input {
+  width: auto;
+  min-height: 0;
+  margin-top: 4px;
+}
+
+.option-btn.multi-option > span,
+.exam-option > span {
+  min-width: 0;
+  line-height: 1.55;
+}
+
+.option-btn.multi-option.missed,
+.exam-options .exam-option.missed {
+  grid-template-columns: auto 32px minmax(0, 1fr) auto;
+}
+
 .option-btn.selected {
   border-color: var(--primary);
   background: var(--primary-soft);
@@ -630,6 +713,24 @@ textarea:focus {
   border-color: var(--danger);
   background: #fdebea;
   color: var(--danger);
+}
+
+.option-btn.missed {
+  border-color: #e0a82e;
+  background: #fff7df;
+  color: #8a5a00;
+}
+
+.option-btn.missed::after {
+  content: "漏选";
+  align-self: center;
+  justify-self: end;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: #f6d989;
+  color: #6f4700;
+  font-size: 12px;
+  font-weight: 700;
 }
 
 .answer-panel {

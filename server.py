@@ -3,6 +3,7 @@ import json
 import mimetypes
 import os
 import posixpath
+import re
 import subprocess
 import tempfile
 import zipfile
@@ -17,9 +18,15 @@ try:
 except Exception:
     Image = None
 
+try:
+    import fitz
+except Exception:
+    fitz = None
+
 
 ROOT = Path(__file__).resolve().parent
 PILLOW_WARNING = "Pillow 未安装，图片尺寸无法识别；大图可能无法自动从选项中分离。" if Image is None else ""
+PDF_WARNING = "PyMuPDF 未安装，PDF 会尝试用本机 Word 转为 docx 后读取；建议安装：python -m pip install PyMuPDF" if fitz is None else ""
 
 
 class UploadedFile:
@@ -159,19 +166,147 @@ def make_extract_response(text, method):
     payload = {"ok": True, "text": text, "method": method}
     if PILLOW_WARNING:
         payload["warning"] = PILLOW_WARNING
+    if method.startswith("pdf") and PDF_WARNING:
+        payload["warning"] = " ".join([payload.get("warning", ""), PDF_WARNING]).strip()
     return payload
 
 
 def extract_text(path):
     suffix = path.suffix.lower()
-    if suffix not in {".docx", ".doc"}:
-        raise ValueError("仅支持 docx、doc。")
+    if suffix not in {".docx", ".doc", ".pdf"}:
+        raise ValueError("仅支持 docx、doc、pdf。")
     if suffix == ".docx":
         return extract_docx_text(path), "docx-xml-with-images"
     if suffix == ".doc":
         converted = path.with_suffix(".converted.docx")
         convert_with_word(path, converted, 16)
         return extract_docx_text(converted), "word-com-docx-with-images"
+    if suffix == ".pdf":
+        return extract_pdf_text(path)
+
+
+def extract_pdf_text(path):
+    if fitz is None:
+        return extract_pdf_text_with_word(path), "pdf-word-docx-with-images"
+
+    parts = []
+    with fitz.open(path) as document:
+        for page_index, page in enumerate(document, start=1):
+            text = page.get_text("text", sort=True) or ""
+            text = normalize_pdf_text(text)
+            if text:
+                parts.append(text)
+            elif page_has_images(page):
+                pixmap = page.get_pixmap(matrix=fitz.Matrix(1.5, 1.5), alpha=False)
+                parts.append(make_image_token(pixmap.tobytes("png"), "image/png"))
+
+    result = "\n".join(part for part in parts if part).strip()
+    if not result:
+        raise RuntimeError("PDF 未提取到有效文本；如果是扫描版，需要先 OCR 或导出为缓存图片。")
+    return result, "pdf-pymupdf-text"
+
+
+def extract_pdf_text_with_word(path):
+    converted = path.with_suffix(".pdf.converted.docx")
+    try:
+        convert_with_word(path, converted, 16)
+        text = extract_docx_text(converted)
+        if looks_like_garbled_text(text):
+            raise RuntimeError("Word 转换后的 PDF 文本疑似乱码或图片化内容。")
+        return text
+    except Exception as exc:
+        raise RuntimeError(
+            "PDF 导入失败：未安装 PyMuPDF，且 Word 转换 PDF 也失败。"
+            "请先执行 python -m pip install PyMuPDF，或手动将 PDF 另存为 docx 后导入。"
+            f" 原因：{exc}"
+        ) from exc
+
+
+def looks_like_garbled_text(text):
+    raw = str(text or "")
+    sample = re.sub(r"\[\[(?:IMG|TABLE):[\s\S]*?\]\]", "[media]", raw)[:8000]
+    if not sample.strip():
+        return True
+    cjk = sum(1 for char in sample if "\u4e00" <= char <= "\u9fff")
+    ascii_text = sum(1 for char in sample if char.isascii() and (char.isalnum() or char in " .,;:!?()[]{}+-*/=_"))
+    unusual = 0
+    visible = 0
+    for char in sample:
+        if char.isspace():
+            continue
+        visible += 1
+        code = ord(char)
+        is_cjk = "\u4e00" <= char <= "\u9fff"
+        is_common_fullwidth = 0x3000 <= code <= 0x303F or 0xFF00 <= code <= 0xFFEF
+        if code > 127 and not is_cjk and not is_common_fullwidth:
+            unusual += 1
+    if "�" in sample or "锟" in sample:
+        return True
+    if visible < 100:
+        return False
+    non_ascii = sum(1 for char in sample if (not char.isspace()) and (not char.isascii()))
+    cjk_ratio = cjk / visible
+    non_ascii_ratio = non_ascii / visible
+    if cjk_ratio < 0.05 and non_ascii_ratio > 0.45:
+        return True
+    return cjk < 80 and ascii_text < 400 and unusual / visible > 0.25
+
+
+def normalize_pdf_text(text):
+    raw_lines = []
+    for line in str(text or "").replace("\r", "\n").splitlines():
+        cleaned = " ".join(line.split())
+        if cleaned:
+            raw_lines.append(cleaned)
+
+    lines = []
+    index = 0
+    while index < len(raw_lines):
+        line = raw_lines[index]
+        if (
+            index + 1 < len(raw_lines)
+            and raw_lines[index + 1] in {"）", ")"}
+            and re.search(r"[（(]\s*[A-HＡ-Ｈ](?:\s*[,，、]?\s*[A-HＡ-Ｈ])*\s*$", line, re.I)
+        ):
+            line = f"{line} {raw_lines[index + 1]}"
+            index += 1
+
+        line = normalize_pdf_spaced_option_markers(line)
+        line = normalize_pdf_embedded_question_starts(line)
+        lines.extend(part for part in line.split("\n") if part.strip())
+        index += 1
+    return "\n".join(lines)
+
+
+def normalize_pdf_spaced_option_markers(line):
+    markers = re.findall(r"(^|\s)([A-HＡ-Ｈ])\s+(?=\S)", line)
+    if len(markers) < 2:
+        return line
+    if re.match(r"^\s*[A-HＡ-Ｈ](?:\s+[A-HＡ-Ｈ]){2,}\s*$", line):
+        return line
+    if re.match(r"^\s*(?:[A-HＡ-Ｈ]\s+){2,}[A-HＡ-Ｈ](?:\s+[01x×]){2,}\s*$", line, re.I):
+        return line
+    return re.sub(r"(^|\s)([A-HＡ-Ｈ])\s+(?=\S)", lambda match: f"{match.group(1)}{match.group(2)}. ", line)
+
+
+def normalize_pdf_embedded_question_starts(line):
+    line = re.sub(
+        r"(?<!^)(?<!\n)\s+(\d{1,3})\s+(?=\S.{0,80}?[（(]\s*(?:[A-HＡ-Ｈ]|正确|错误|对|错|√|×))",
+        r"\n\1、",
+        line,
+    )
+    return re.sub(
+        r"^(\d{1,3})\s+(?=\S.{0,80}?[（(]\s*(?:[A-HＡ-Ｈ]|正确|错误|对|错|√|×))",
+        r"\1、",
+        line,
+    )
+
+
+def page_has_images(page):
+    try:
+        return bool(page.get_images(full=True))
+    except Exception:
+        return False
 
 
 def extract_docx_text(path):
@@ -449,8 +584,10 @@ def run():
     server = ThreadingHTTPServer(("127.0.0.1", port), QuizHandler)
     if PILLOW_WARNING:
         print(f"警告：{PILLOW_WARNING}")
+    if PDF_WARNING:
+        print(f"警告：{PDF_WARNING}")
     print(f"刷题工具已启动：http://127.0.0.1:{port}")
-    print("支持 docx / doc 导入；doc 会调用本机 Word 转换。")
+    print("支持 docx / doc / pdf 导入；doc 会调用本机 Word 转换。")
     server.serve_forever()
 
 

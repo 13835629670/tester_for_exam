@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>刷题记忆工具</title>
-  <link rel="stylesheet" href="./styles.css">
+  <link rel="stylesheet" href="./styles.css?v=20260701-exam-entries">
 </head>
 <body>
   <main class="app-shell">
@@ -13,7 +13,7 @@
         <span class="brand-mark">T</span>
         <div>
           <h1>刷题记忆工具</h1>
-          <p>单选、判断、错题复习</p>
+          <p>多题型、错题复习</p>
         </div>
       </div>
 
@@ -32,12 +32,12 @@
       <section class="panel">
         <div class="panel-head">
           <h2>导入题库</h2>
-          <span class="muted">docx / doc</span>
+          <span class="muted">docx / doc / pdf</span>
         </div>
         <label class="upload-box">
-          <input id="fileInput" type="file" multiple accept=".docx,.doc">
+          <input id="fileInput" type="file" multiple accept=".docx,.doc,.pdf">
           <span>选择文件</span>
-          <small>支持单片机单选、判断题库</small>
+          <small>支持单选、多选、判断、填空、简答题库</small>
         </label>
         <p id="serverHint" class="server-hint"></p>
         <div id="importLog" class="import-log"></div>
@@ -75,14 +75,14 @@
 
       <nav class="tabs" aria-label="功能">
         <button class="tab active" type="button" data-view="practice">练习</button>
-        <button class="tab" type="button" data-view="exam">单片机模拟考试</button>
+        <button class="tab" type="button" data-view="exam">模拟组卷</button>
         <button class="tab" type="button" data-view="wrong">错题本</button>
         <button class="tab" type="button" data-view="preview">全部预览</button>
       </nav>
 
       <section id="emptyState" class="empty-state">
         <h2>先创建科目，再上传题库</h2>
-        <p>支持从 docx / doc 中识别单片机单选和判断题，题目需包含“答案：”。</p>
+        <p>支持从 docx / doc / pdf 中识别单选、多选、判断、填空和简答题。</p>
       </section>
 
       <section id="practiceView" class="view active">
@@ -90,7 +90,10 @@
           <div class="segmented">
             <button class="active" type="button" data-practice-mode="all">全部</button>
             <button type="button" data-practice-mode="single">单选</button>
+            <button type="button" data-practice-mode="multi">多选</button>
             <button type="button" data-practice-mode="judge">判断</button>
+            <button type="button" data-practice-mode="blank">填空</button>
+            <button type="button" data-practice-mode="short">简答</button>
           </div>
           <div class="toolbar-actions">
             <input id="jumpInput" type="number" min="1" placeholder="题号" aria-label="跳转题号">
@@ -114,13 +117,33 @@
       <section id="examView" class="view">
         <div class="toolbar">
           <div>
-            <h3>单片机模拟考试</h3>
-            <p class="exam-note">备注：可不选视为 0 分。</p>
+            <h3>模拟组卷</h3>
+            <p class="exam-note">备注：客观题可不选视为 0 分，填空和简答只展示参考答案。</p>
             <div id="examSummary" class="exam-summary"></div>
           </div>
           <div class="toolbar-actions">
-            <button id="generateExamBtn" type="button">生成模拟卷</button>
             <button id="submitExamBtn" type="button">交卷算分</button>
+          </div>
+        </div>
+        <div class="exam-entry-grid">
+          <div class="exam-builder">
+            <h3>单片机模拟考试（固定策略）</h3>
+            <p class="exam-note">按原组卷策略生成：选择题 36 题 54 分，判断题 16 题 16 分，满分 70 分。</p>
+            <div class="exam-builder-actions">
+              <button id="generateExamBtn" type="button">生成单片机固定卷</button>
+            </div>
+          </div>
+          <div class="exam-builder">
+            <h3>自定义模拟组卷</h3>
+            <p class="exam-note">数量留空表示该题型全选；填空和简答只展示参考答案，不计入分数。</p>
+            <div class="exam-builder-grid">
+              <label>单选<input id="genericSingleCount" type="number" min="0" placeholder="全部"></label>
+              <label>多选<input id="genericMultiCount" type="number" min="0" placeholder="全部"></label>
+              <label>判断<input id="genericJudgeCount" type="number" min="0" placeholder="全部"></label>
+              <label>填空<input id="genericBlankCount" type="number" min="0" placeholder="全部"></label>
+              <label>简答<input id="genericShortCount" type="number" min="0" placeholder="全部"></label>
+              <button id="generateGenericExamBtn" type="button">生成自定义卷</button>
+            </div>
           </div>
         </div>
         <div id="examArea" class="content-area"></div>
@@ -132,7 +155,10 @@
           <div class="segmented">
             <button class="active" type="button" data-preview-filter="all">全部</button>
             <button type="button" data-preview-filter="single">单选</button>
+            <button type="button" data-preview-filter="multi">多选</button>
             <button type="button" data-preview-filter="judge">判断</button>
+            <button type="button" data-preview-filter="blank">填空</button>
+            <button type="button" data-preview-filter="short">简答</button>
           </div>
         </div>
         <div id="previewArea" class="content-area"></div>
@@ -150,6 +176,6 @@
   </template>
 
   <script src="https://cdn.jsdelivr.net/npm/mammoth@1.8.0/mammoth.browser.min.js"></script>
-  <script src="./app.js?v=20260629-mcu-exam" defer></script>
+  <script src="./app.js?v=20260701-exam-entries" defer></script>
 </body>
 </html>

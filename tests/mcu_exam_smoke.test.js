@@ -25,6 +25,9 @@ range(2, 40).forEach((point, index) => {
 });
 
 const exam = createMcuExam(questions);
+assert.strictEqual(exam.title, "单片机模拟考试");
+assert.strictEqual(exam.total, 70);
+assert(exam.summary.includes("单片机固定策略"));
 assert.strictEqual(exam.items.filter((item) => item.type === "single").length, 36);
 assert.strictEqual(exam.items.filter((item) => item.type === "judge").length, 16);
 assert.deepStrictEqual(exam.warnings, []);

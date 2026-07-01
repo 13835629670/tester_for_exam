@@ -110,6 +110,12 @@
     examSummary: document.getElementById("examSummary"),
     generateExamBtn: document.getElementById("generateExamBtn"),
     submitExamBtn: document.getElementById("submitExamBtn"),
+    generateGenericExamBtn: document.getElementById("generateGenericExamBtn"),
+    genericSingleCount: document.getElementById("genericSingleCount"),
+    genericMultiCount: document.getElementById("genericMultiCount"),
+    genericJudgeCount: document.getElementById("genericJudgeCount"),
+    genericBlankCount: document.getElementById("genericBlankCount"),
+    genericShortCount: document.getElementById("genericShortCount"),
     jumpInput: document.getElementById("jumpInput"),
     jumpBtn: document.getElementById("jumpBtn"),
     clearProgressBtn: document.getElementById("clearProgressBtn"),
@@ -123,7 +129,10 @@
 
   const typeLabels = {
     single: "单选",
-    judge: "判断"
+    multi: "多选",
+    judge: "判断",
+    blank: "填空",
+    short: "简答"
   };
 
   function rangePoints(start, end) {
@@ -150,7 +159,10 @@
       answers: {},
       submitted: false,
       result: null,
-      warnings: []
+      warnings: [],
+      title: "",
+      summary: "",
+      total: 0
     };
   }
 
@@ -180,10 +192,10 @@
   function renderServerHint() {
     if (!els.serverHint) return;
     if (window.location.protocol === "file:") {
-      els.serverHint.textContent = "当前是直接打开页面：doc 文件无法可靠读取，请用 python server.py 启动后导入。";
+      els.serverHint.textContent = "当前是直接打开页面：doc/pdf 文件无法可靠读取，请用 python server.py 启动后导入。";
       els.serverHint.classList.add("warn");
     } else {
-      els.serverHint.textContent = "当前已通过本地服务打开：doc/docx 均可导入。";
+      els.serverHint.textContent = "当前已通过本地服务打开：doc/docx/pdf 均可导入。";
       els.serverHint.classList.remove("warn");
     }
   }
@@ -214,10 +226,30 @@
     if (els.submitExamBtn) {
       els.submitExamBtn.addEventListener("click", () => {
         if (!state.exam.items.length) {
-          logImport("请先生成单片机模拟卷。", "warn");
+          logImport("请先生成试卷。", "warn");
           return;
         }
         submitMcuExam();
+      });
+    }
+
+    if (els.generateGenericExamBtn) {
+      els.generateGenericExamBtn.addEventListener("click", () => {
+        const subject = getActiveSubject();
+        if (!subject || !subject.questions.length) {
+          logImport("请先导入题库。", "warn");
+          return;
+        }
+        const counts = countTypes(subject.questions);
+        state.exam = createGenericExam(subject.questions, {
+          single: readExamCount(els.genericSingleCount, counts.single),
+          multi: readExamCount(els.genericMultiCount, counts.multi),
+          judge: readExamCount(els.genericJudgeCount, counts.judge),
+          blank: readExamCount(els.genericBlankCount, counts.blank),
+          short: readExamCount(els.genericShortCount, counts.short)
+        });
+        state.activeView = "exam";
+        render();
       });
     }
 
@@ -308,6 +340,12 @@
     });
   }
 
+  function readExamCount(input, fallback) {
+    if (!input || input.value === "") return Math.max(0, Number(fallback) || 0);
+    const value = Number(input.value);
+    return Number.isFinite(value) ? Math.max(0, Math.floor(value)) : 0;
+  }
+
   function createSubject(name) {
     const subject = {
       id: createId(),
@@ -324,7 +362,7 @@
   }
 
   function createPracticeProgress() {
-    return { all: 0, single: 0, judge: 0 };
+    return { all: 0, single: 0, multi: 0, judge: 0, blank: 0, short: 0 };
   }
 
   function createId() {
@@ -391,19 +429,22 @@
       subjects,
       activeSubjectId,
       activeView: ["practice", "wrong", "preview", "exam"].includes(value.activeView) ? value.activeView : "practice",
-      practiceMode: ["all", "single", "judge"].includes(value.practiceMode) ? value.practiceMode : "all",
+      practiceMode: ["all", "single", "multi", "judge", "blank", "short"].includes(value.practiceMode) ? value.practiceMode : "all",
       practiceOrder: Array.isArray(value.practiceOrder) ? value.practiceOrder : [],
       practiceIndex: Number.isInteger(value.practiceIndex) && value.practiceIndex >= 0 ? value.practiceIndex : 0,
-      previewFilter: ["all", "single", "judge"].includes(value.previewFilter) ? value.previewFilter : "all"
+      previewFilter: ["all", "single", "multi", "judge", "blank", "short"].includes(value.previewFilter) ? value.previewFilter : "all"
     };
   }
 
   function normalizeCachedQuestions(value) {
     if (!Array.isArray(value)) return [];
-    return value.map((question) => ({
+    const questions = value.map((question) => ({
       ...question,
-      knowledgePoint: question.knowledgePoint ?? extractKnowledgePoint(question.raw || "")
+      chapter: normalizeQuestionContext(question.chapter || ""),
+      knowledgePoint: question.knowledgePoint ?? extractKnowledgePoint(question.raw || ""),
+      originNumber: question.originNumber ?? extractOriginalQuestionNumber(question.raw || "")
     }));
+    return inferMissingQuestionContexts(questions);
   }
 
   function normalizePracticeProgress(value) {
@@ -467,8 +508,8 @@
 
     for (const file of files) {
       const ext = getExt(file.name);
-      if (!["docx", "doc"].includes(ext)) {
-        logImport(`${file.name} 已跳过：仅支持 docx 和 doc。`, "warn");
+      if (!["docx", "doc", "pdf"].includes(ext)) {
+        logImport(`${file.name} 已跳过：仅支持 docx、doc 和 pdf。`, "warn");
         continue;
       }
 
@@ -482,7 +523,7 @@
         }));
 
         if (!questions.length) {
-          logImport(`${file.name} 未识别到单选题或判断题。`, "warn");
+          logImport(`${file.name} 未识别到题目。`, "warn");
           continue;
         }
 
@@ -531,7 +572,11 @@
       throw new Error("doc 文件需要通过 python server.py 启动后，从 http://127.0.0.1:5175 打开页面再导入。");
     }
 
-    throw new Error("仅支持 docx 和 doc。");
+    if (ext === "pdf") {
+      throw new Error("pdf 文件需要通过 python server.py 启动后导入；若提示缺少 PyMuPDF，请先执行 python -m pip install PyMuPDF。");
+    }
+
+    throw new Error("仅支持 docx、doc 和 pdf。");
   }
 
   async function tryServerExtractText(file) {
@@ -544,14 +589,17 @@
         method: "POST",
         body: formData
       });
-      if (!response.ok) return "";
       const payload = await response.json();
+      if (!response.ok && payload && payload.error) {
+        throw new Error(payload.error);
+      }
       if (payload && payload.ok && payload.text) {
         logImport(`已使用本地解析服务读取：${file.name}`, "ok");
         if (payload.warning) logImport(payload.warning, "warn");
         return payload.text;
       }
     } catch (error) {
+      if (getExt(file.name) === "pdf") throw error;
       return "";
     }
     return "";
@@ -559,16 +607,27 @@
 
   function assertReadableText(text, fileName) {
     const sample = String(text || "").slice(0, 4000);
+    const visibleSample = String(text || "")
+      .replace(/\[\[(?:IMG|TABLE):[\s\S]*?\]\]/g, "[media]")
+      .slice(0, 8000);
     const badChars = (sample.match(/[�\u0000-\u0008\u000b\u000c\u000e-\u001f]/g) || []).length;
-    const cjkChars = (sample.match(/[\u4e00-\u9fa5]/g) || []).length;
+    const cjkChars = (visibleSample.match(/[\u4e00-\u9fa5]/g) || []).length;
     const answerMarks = (sample.match(/答案：/g) || []).length;
     const embedMarks = (sample.match(/Office_|_123456|Times New Roman|System|MathType/g) || []).length;
     const badRatio = sample ? badChars / sample.length : 1;
+    const visibleChars = visibleSample.replace(/\s/g, "").length;
+    const nonAsciiChars = Array.from(visibleSample).filter((char) => !/\s/.test(char) && !/^[\x00-\x7F]$/.test(char)).length;
+    const cjkRatio = visibleChars ? cjkChars / visibleChars : 0;
+    const nonAsciiRatio = visibleChars ? nonAsciiChars / visibleChars : 0;
 
     if (!sample.trim()) {
       throw new Error("未读取到有效文本。");
     }
-    if (badRatio > 0.02 || (embedMarks >= 3 && cjkChars < 80 && answerMarks === 0)) {
+    if (
+      badRatio > 0.02
+      || (embedMarks >= 3 && cjkChars < 80 && answerMarks === 0)
+      || (visibleChars > 100 && cjkRatio < 0.05 && nonAsciiRatio > 0.45)
+    ) {
       throw new Error(`${fileName} 读取结果像乱码，请通过 python server.py 启动后重新导入，或另存为 docx 后再试。`);
     }
   }
@@ -581,7 +640,10 @@
     for (const section of sections) {
       for (const block of splitQuestionBlocks(section.content, section.type)) {
         const parsed = parseBlock(block, section.type, sourceName);
-        if (parsed) questions.push(parsed);
+        if (parsed) {
+          parsed.chapter = parsed.chapter || section.chapter || "";
+          questions.push(parsed);
+        }
       }
     }
 
@@ -600,7 +662,6 @@
 
     return withRichTokensProtected(normalized, (value) => value
       .replace(/选项\s*([A-HＡ-Ｈ])\s*[）).．、:：]\s*/g, (_, key) => `${normalizeOptionKey(key)}. `)
-      .replace(answerLeakBeforeOptionListPattern(), (_, open, close) => `${open} ${close}`)
       .replace(optionMarkerPattern(), (...args) => normalizeOptionMarkerMatch(args)))
       .replace(/\n{2,}/g, "\n")
       .trim();
@@ -617,7 +678,7 @@
   }
 
   function splitSections(text) {
-    const pattern = /(?:^|\n)\s*(?:[一二三四五六七八九十]+|\d+)[、.．]\s*(单选题|单项选择题|选择题|判断题)[^\n]*/g;
+    const pattern = /(?:^|\n)\s*(?:[一二三四五六七八九十]+|\d+)[、.．]\s*(单选题|单项选择题|选择题|多选题|多项选择题|判断题|填空题|简答题|问答题|主观题|论述题)[^\n]*/g;
     const matches = [];
     let match;
 
@@ -625,7 +686,8 @@
       matches.push({
         index: match.index,
         end: pattern.lastIndex,
-        type: /判断/.test(match[1]) ? "judge" : "single"
+        type: sectionTypeFromTitle(match[1]),
+        chapter: findChapterBefore(text, match.index)
       });
     }
 
@@ -633,13 +695,50 @@
       return [{ type: "auto", content: text }];
     }
 
-    return matches.map((item, index) => {
+    const sections = [];
+    const leading = text.slice(0, matches[0].index).trim();
+    if (leading) {
+      sections.push({
+        type: "auto",
+        chapter: "",
+        content: leading
+      });
+    }
+
+    return sections.concat(matches.map((item, index) => {
       const next = matches[index + 1];
       return {
         type: item.type,
+        chapter: item.chapter,
         content: text.slice(item.end, next ? next.index : text.length).trim()
       };
-    });
+    }));
+  }
+
+  function sectionTypeFromTitle(title) {
+    if (/判断/.test(title)) return "judge";
+    if (/多选|多项/.test(title)) return "multi";
+    if (/填空/.test(title)) return "blank";
+    if (/简答|问答|主观|论述/.test(title)) return "short";
+    return "single";
+  }
+
+  function findChapterBefore(text, index) {
+    const lines = String(text || "")
+      .slice(0, Math.max(0, index))
+      .split("\n")
+      .map((line) => line.trim())
+      .filter(Boolean)
+      .reverse();
+    return lines.find((line) => isChapterHeading(line) || isQuestionContextHeading(line)) || "";
+  }
+
+  function isChapterHeading(line) {
+    const text = String(line || "").trim();
+    if (!text || text.length > 40) return false;
+    if (isQuestionStartLine(text) || /^[A-HＡ-Ｈ]\s*[.．、:：)）]/.test(text)) return false;
+    if (/答案[:：]|单选题|单项选择题|选择题|多选题|多项选择题|判断题|填空题|简答题|问答题|论述题/.test(text)) return false;
+    return /^(导论|绪论|总论|第[一二三四五六七八九十\d]+[章节篇]|专题|模块|知识点)/.test(text);
   }
 
   function splitQuestionBlocks(content, type) {
@@ -651,7 +750,12 @@
       .map((line) => line.trim())
       .filter(Boolean);
 
-    if (countQuestionStartLines(lines) >= 3) {
+    const questionStartCount = countQuestionStartLines(lines);
+    if (
+      questionStartCount >= 3
+      || (type !== "auto" && questionStartCount >= 1)
+      || (type === "auto" && questionStartCount >= 1 && looksLikeNumberedQuestionContent(lines))
+    ) {
       return splitNumberedQuestionBlocks(lines, type);
     }
 
@@ -674,14 +778,39 @@
     return lines.filter((line) => isQuestionStartLine(line)).length;
   }
 
+  function looksLikeNumberedQuestionContent(lines) {
+    const text = lines.join("\n");
+    const hasInlineObjectiveAnswer = /[（(]\s*(?:[A-HＡ-Ｈ](?:\s*[,，、]?\s*[A-HＡ-Ｈ])*|正确|错误|对|错|√|×)\s*[）)]/i.test(text);
+    const hasChoiceOptionMarker = /(?:^|\n|\s)[A-HＡ-Ｈ]\s*[.．、:：)）]\s*\S/.test(text);
+    return hasInlineObjectiveAnswer && hasChoiceOptionMarker;
+  }
+
   function splitNumberedQuestionBlocks(lines, type) {
     const blocks = [];
     let buffer = [];
     let pendingVisual = [];
+    let pendingChapter = "";
 
     for (const line of lines) {
+      if (isChapterHeading(line) || isQuestionContextHeading(line)) {
+        if (buffer.length) {
+          blocks.push(buffer.join("\n"));
+          buffer = [];
+        }
+        pendingVisual = [];
+        pendingChapter = normalizeQuestionContext(line);
+        continue;
+      }
+
       if (isQuestionStartLine(line)) {
-        buffer = [line, ...pendingVisual];
+        if (buffer.length) {
+          blocks.push(buffer.join("\n"));
+        }
+        buffer = [
+          ...(pendingChapter ? [`来源：${pendingChapter}`] : []),
+          line,
+          ...pendingVisual
+        ];
         pendingVisual = [];
         continue;
       }
@@ -702,6 +831,8 @@
       }
     }
 
+    if (buffer.length) blocks.push(buffer.join("\n"));
+
     return blocks.filter((block) => type !== "judge" || !hasChoiceOptions(block));
   }
 
@@ -720,14 +851,57 @@
     return /^图\s*[一二三四五六七八九十\d]+(?:\s+图\s*[一二三四五六七八九十\d]+)*$/.test(String(line || "").trim());
   }
 
-  function parseBlock(block, type, sourceName) {
-    if (isSuspiciousBlock(block)) return null;
-    const answerMatch = block.match(/答案：\s*([\s\S]+)$/);
-    if (!answerMatch) return null;
+  function isQuestionContextHeading(line) {
+    const text = String(line || "").trim();
+    if (!text || text.length > 70) return false;
+    if (/^\d+$/.test(text)) return false;
+    if (isQuestionStartLine(text) || /^[A-HＡ-Ｈ]\s*[.．、:：)）]/.test(text)) return false;
+    if (/答案[:：]/.test(text)) return false;
+    if (/^(?:第[一二三四五六七八九十\d]+[章节篇]|导论|绪论|总论|专题|模块|知识点)/.test(text)) return true;
+    if (/《[^》]+》/.test(text) && /(试卷|试题|题库|练习|模拟)/.test(text)) return true;
+    if (/(?:^|\s)(?:试卷|试题)\s*\d+\s*$/.test(text)) return true;
+    return false;
+  }
 
-    const knowledgePoint = extractKnowledgePoint(block);
-    const body = stripAnswerLeakBeforeOptions(cleanupStem(block.slice(0, answerMatch.index)));
-    const rawAnswer = answerMatch[1].trim();
+  function extractBlockChapter(block) {
+    const match = String(block || "").match(/^(?:章节|来源)：([^\n]+)\n([\s\S]*)$/);
+    if (!match) {
+      return { chapter: "", content: String(block || "") };
+    }
+    return {
+      chapter: normalizeQuestionContext(match[1]),
+      content: match[2].trim()
+    };
+  }
+
+  function parseBlock(block, type, sourceName) {
+    const chapterBlock = extractBlockChapter(block);
+    const blockContent = chapterBlock.content;
+    if (isSuspiciousBlock(blockContent)) return null;
+    const answerMatch = blockContent.match(/答案：\s*([\s\S]+)$/);
+    const knowledgePoint = extractKnowledgePoint(blockContent);
+    const originNumber = extractOriginalQuestionNumber(blockContent);
+    let body = "";
+    let rawAnswer = "";
+    let inlineChoice = null;
+    let inlineJudge = null;
+
+    if (answerMatch) {
+      body = stripAnswerLeakBeforeOptions(blockContent.slice(0, answerMatch.index).trim());
+      rawAnswer = answerMatch[1].trim();
+    } else {
+      inlineJudge = extractInlineJudgeAnswer(blockContent);
+      if (inlineJudge && (type === "judge" || type === "auto")) {
+        body = cleanupStem(inlineJudge.body);
+        rawAnswer = inlineJudge.answer;
+      } else {
+        inlineChoice = extractInlineChoiceAnswer(blockContent);
+        if (!inlineChoice) return null;
+        body = stripAnswerLeakBeforeOptions(cleanupStem(inlineChoice.body));
+        rawAnswer = inlineChoice.answer;
+      }
+    }
+
     const parsedType = type === "auto" ? inferType(body, rawAnswer, sourceName) : type;
 
     if (parsedType === "judge") {
@@ -744,13 +918,15 @@
         ],
         answer,
         knowledgePoint,
-        raw: block
+        originNumber,
+        chapter: chapterBlock.chapter,
+        raw: blockContent
       };
     }
 
     if (parsedType === "single") {
       const options = parseOptions(body);
-      const answer = normalizeOptionKey((rawAnswer.match(/[A-HＡ-Ｈ]/i) || [""])[0]);
+      const answer = normalizeOptionAnswer(rawAnswer).slice(0, 1);
       if (!answer || options.length < 2 || !options.stem) return null;
       const normalized = normalizeSingleQuestionMedia(cleanQuestionStem(options.stem), options);
       return {
@@ -761,7 +937,62 @@
         options: normalized.options,
         answer,
         knowledgePoint,
-        raw: block
+        originNumber,
+        chapter: chapterBlock.chapter,
+        raw: blockContent
+      };
+    }
+
+    if (parsedType === "multi") {
+      const options = parseOptions(body);
+      const answer = normalizeOptionAnswer(rawAnswer);
+      if (!answer || answer.length < 2 || options.length < 2 || !options.stem) return null;
+      const normalized = normalizeSingleQuestionMedia(cleanQuestionStem(options.stem), options);
+      return {
+        id: createId(),
+        type: "multi",
+        sourceName,
+        stem: normalized.stem,
+        options: normalized.options,
+        answer,
+        knowledgePoint,
+        originNumber,
+        chapter: chapterBlock.chapter,
+        raw: blockContent
+      };
+    }
+
+    if (parsedType === "blank") {
+      const stem = cleanFillOrShortStem(body);
+      if (!stem || !rawAnswer) return null;
+      return {
+        id: createId(),
+        type: "blank",
+        sourceName,
+        stem,
+        options: [],
+        answer: cleanReferenceAnswer(rawAnswer),
+        knowledgePoint,
+        originNumber,
+        chapter: chapterBlock.chapter,
+        raw: blockContent
+      };
+    }
+
+    if (parsedType === "short") {
+      const stem = cleanFillOrShortStem(body);
+      if (!stem || !rawAnswer) return null;
+      return {
+        id: createId(),
+        type: "short",
+        sourceName,
+        stem,
+        options: [],
+        answer: cleanReferenceAnswer(rawAnswer),
+        knowledgePoint,
+        originNumber,
+        chapter: chapterBlock.chapter,
+        raw: blockContent
       };
     }
 
@@ -770,14 +1001,124 @@
 
   function inferType(body, rawAnswer, sourceName) {
     if (normalizeJudgeAnswer(rawAnswer)) return "judge";
-    const hasChoiceAnswer = /^[A-HＡ-Ｈ]/i.test(rawAnswer.trim());
-    if (hasChoiceAnswer && parseOptions(body).length >= 2) return "single";
+    const choiceAnswer = normalizeOptionAnswer(rawAnswer);
+    if (choiceAnswer && parseOptions(body).length >= 2) return choiceAnswer.length > 1 ? "multi" : "single";
+    if (/填空/.test(String(sourceName || "")) || /_{2,}|＿{2,}|-{3,}/.test(body)) return "blank";
+    if (/简答|问答|主观|论述/.test(String(sourceName || ""))) return "short";
     return "";
+  }
+
+  function extractInlineChoiceAnswer(block) {
+    const source = String(block || "");
+    const optionStart = findFirstStandaloneOptionIndex(source);
+    if (optionStart <= 0) return null;
+    const stemPart = source.slice(0, optionStart);
+    const optionPart = source.slice(optionStart);
+    const matches = Array.from(stemPart.matchAll(/[（(]\s*([A-HＡ-Ｈ](?:\s*[,，、]?\s*[A-HＡ-Ｈ])*)\s*[）)]/gi));
+    const last = matches[matches.length - 1];
+    if (!last) return null;
+
+    const answer = normalizeOptionAnswer(last[1]);
+    if (!answer) return null;
+    const before = stemPart.slice(0, last.index);
+    const after = stemPart.slice(last.index + last[0].length);
+    const blank = last[0].startsWith("（") ? "（ ）" : "( )";
+    return {
+      answer,
+      body: `${before}${blank}${after}${optionPart}`
+    };
+  }
+
+  function extractInlineJudgeAnswer(block) {
+    const source = String(block || "");
+    const matches = Array.from(source.matchAll(/[（(]\s*(正确|错误|对|错|√|×|T|F|true|false)\s*[）)]/gi));
+    const last = matches[matches.length - 1];
+    if (!last) return null;
+    const answer = normalizeJudgeAnswer(last[1]);
+    if (!answer) return null;
+    return {
+      answer,
+      body: `${source.slice(0, last.index)}${source.slice(last.index + last[0].length)}`
+    };
+  }
+
+  function findFirstStandaloneOptionIndex(value) {
+    const match = String(value || "").match(/(?:^|\n)\s*(?:选项\s*)?[A-HＡ-Ｈ]\s*[.．、:：)）]\s*/);
+    return match ? (match.index + (match[0].match(/^\n/) ? 1 : 0)) : -1;
   }
 
   function extractKnowledgePoint(value) {
     const match = String(value || "").match(/知识点\s*[:：]\s*(\d+)/);
     return match ? Number(match[1]) : null;
+  }
+
+  function extractOriginalQuestionNumber(value) {
+    const match = String(value || "").match(/^\s*(?:难度\s*[:：]?\s*\S+\s*)?(\d{1,3})\s*[、.．)]\s*\S/);
+    return match ? Number(match[1]) : null;
+  }
+
+  function normalizeQuestionContext(value) {
+    const text = String(value || "")
+      .replace(/^(?:章节|来源)\s*[:：]\s*/, "")
+      .replace(/\s+/g, " ")
+      .trim();
+    if (!text || /^\d+$/.test(text)) return "";
+    return text;
+  }
+
+  function questionContextLabel(value) {
+    const text = normalizeQuestionContext(value);
+    if (!text) return "";
+    if (/试卷|试题|套题|模拟|练习/.test(text)) return "试卷";
+    if (/^第[一二三四五六七八九十\d]+[章节篇]|^导论|^绪论|^总论|^专题|^模块|^知识点/.test(text)) return "章节";
+    return "来源";
+  }
+
+  function inferMissingQuestionContexts(questions) {
+    const groups = new Map();
+    questions.forEach((question, index) => {
+      const key = question.importId || question.sourceName || "__unknown__";
+      if (!groups.has(key)) groups.set(key, []);
+      groups.get(key).push({ question, index });
+    });
+
+    for (const group of groups.values()) {
+      if (!group.some(({ question }) => shouldInferPaperContext(question))) continue;
+      let inferredPaper = 1;
+      let last = null;
+
+      for (const item of group.sort((a, b) => a.index - b.index)) {
+        const question = item.question;
+        const origin = Number(question.originNumber ?? extractOriginalQuestionNumber(question.raw || ""));
+        if (last && isLikelyNextPaperBoundary(last, question, origin)) {
+          inferredPaper += 1;
+        }
+
+        if (!normalizeQuestionContext(question.chapter || "")) {
+          question.chapter = `第 ${inferredPaper} 套（推断）`;
+        }
+
+        if (Number.isFinite(origin)) {
+          question.originNumber = origin;
+          last = { type: question.type, origin };
+        }
+      }
+    }
+
+    return questions;
+  }
+
+  function shouldInferPaperContext(question) {
+    const sourceName = String(question && question.sourceName ? question.sourceName : "");
+    if (normalizeQuestionContext(question && question.chapter ? question.chapter : "")) return false;
+    return /\.pdf$/i.test(sourceName) || /套题|试卷|试题/.test(sourceName);
+  }
+
+  function isLikelyNextPaperBoundary(last, question, origin) {
+    if (!last || !Number.isFinite(origin) || !Number.isFinite(last.origin)) return false;
+    if (origin > 3 || last.origin <= origin) return false;
+    if (question.type === last.type) return true;
+    return question.type === "single" || question.type === "judge";
   }
 
   function isSuspiciousBlock(block) {
@@ -979,6 +1320,14 @@
     return value.toUpperCase();
   }
 
+  function normalizeOptionAnswer(value) {
+    const letters = String(value || "")
+      .replace(/[Ａ-Ｈ]/g, (char) => String.fromCharCode(char.charCodeAt(0) - 0xfee0))
+      .toUpperCase()
+      .match(/[A-H]/g) || [];
+    return Array.from(new Set(letters)).sort((a, b) => optionKeyOrder(a) - optionKeyOrder(b)).join("");
+  }
+
   function optionMarkerPattern() {
     return /(^|[\s\n）)])([A-HＡ-Ｈ])(?:\s*\)\s*|\s*(?=\[\[(?:IMG|TABLE):))|([A-HＡ-Ｈ])\s*[.．、:：]\s*/g;
   }
@@ -1017,10 +1366,36 @@
 
   function cleanQuestionStem(value) {
     return cleanupStem(value)
-      .replace(/[（(]\s*[A-DＡ-Ｄ]\s*[）)]\s*$/i, "（ ）")
+      .replace(/[（(]\s*[A-HＡ-Ｈ](?:\s*[,，、]?\s*[A-HＡ-Ｈ])*\s*[）)]\s*$/i, "（ ）")
       .replace(/[（(]\s*$/g, "（ ）")
       .replace(/[（(]\s*[）)]/g, "（ ）")
       .replace(/\s+/g, " ")
+      .trim();
+  }
+
+  function cleanFillOrShortStem(value) {
+    return cleanupStemPreserveLines(value)
+      .replace(/_{2,}|＿{2,}|-{3,}/g, "________")
+      .replace(/[ \t]+\n/g, "\n")
+      .replace(/\n[ \t]+/g, "\n")
+      .replace(/\n{3,}/g, "\n\n")
+      .trim();
+  }
+
+  function cleanupStemPreserveLines(value) {
+    return String(value || "")
+      .replace(/^\s*知识点\s*[:：]\s*\S+\s*难易度\s*[:：]\s*\S+\s*认知度\s*[:：]\s*\S+\s*/, "")
+      .replace(/^\s*难度\s*[:：]?\s*\S+\s*/, "")
+      .replace(/^\s*\d+\s*[、.．)]\s*/, "")
+      .replace(/\r/g, "\n")
+      .replace(/[ \t]+/g, " ")
+      .trim();
+  }
+
+  function cleanReferenceAnswer(value) {
+    return String(value || "")
+      .replace(/^\s*参考答案\s*[:：]\s*/g, "")
+      .replace(/\s+$/g, "")
       .trim();
   }
 
@@ -1034,8 +1409,12 @@
   }
 
   function normalizeJudgeAnswer(value) {
-    if (/正确|对|√|true|t/i.test(value)) return "正确";
-    if (/错误|错|×|false|f/i.test(value)) return "错误";
+    const text = String(value || "")
+      .trim()
+      .replace(/[。；;，,、\s]/g, "")
+      .toLowerCase();
+    if (/^(正确|对|√|true|t)$/.test(text)) return "正确";
+    if (/^(错误|错|×|false|f)$/.test(text)) return "错误";
     return "";
   }
 
@@ -1122,7 +1501,10 @@
     [
       ["总题", questions.length],
       ["单选", counts.single],
+      ["多选", counts.multi],
       ["判断", counts.judge],
+      ["填空", counts.blank],
+      ["简答", counts.short],
       ["错题", subject ? subject.wrongIds.size : 0]
     ].forEach(([label, count]) => {
       const span = document.createElement("span");
@@ -1205,12 +1587,111 @@
     card.querySelector(".question-meta").innerHTML = `
       <span class="type-pill">${typeLabels[question.type]}</span>
       <span>${escapeHtml(indexText)}</span>
-      <span>${escapeHtml(question.sourceName || "")}</span>
+      ${renderQuestionScopeMeta(question)}
     `;
     appendRichContent(card.querySelector("h3"), question.stem);
 
     const optionArea = card.querySelector(".options");
     const answerPanel = card.querySelector(".answer-panel");
+
+    if (isSelfCheckedQuestion(question)) {
+      const selfInput = document.createElement("textarea");
+      selfInput.className = "self-answer-input";
+      selfInput.rows = question.type === "short" ? 5 : 2;
+      selfInput.placeholder = "可以在这里写下自己的答案，也可以直接查看参考答案。";
+      optionArea.appendChild(selfInput);
+
+      const revealBtn = document.createElement("button");
+      revealBtn.type = "button";
+      revealBtn.className = "option-btn";
+      revealBtn.textContent = "显示参考答案";
+      revealBtn.addEventListener("click", () => {
+        answerPanel.innerHTML = `<strong>参考答案：</strong>${escapeHtml(question.answer || "暂无")}`;
+        answerPanel.classList.add("show");
+      });
+
+      const rightBtn = document.createElement("button");
+      rightBtn.type = "button";
+      rightBtn.className = "option-btn";
+      rightBtn.textContent = "记为答对";
+      rightBtn.addEventListener("click", () => {
+        subject.answered.set(question.id, "self-correct");
+        subject.wrongIds.delete(question.id);
+        answerPanel.innerHTML = `<strong>已记为答对。</strong>参考答案：${escapeHtml(question.answer || "暂无")}`;
+        answerPanel.classList.add("show");
+        renderHeader();
+        scheduleSave();
+      });
+
+      const wrongBtn = document.createElement("button");
+      wrongBtn.type = "button";
+      wrongBtn.className = "option-btn";
+      wrongBtn.textContent = "记为答错";
+      wrongBtn.addEventListener("click", () => {
+        subject.answered.set(question.id, "self-wrong");
+        subject.wrongIds.add(question.id);
+        answerPanel.innerHTML = `<strong>已加入错题。</strong>参考答案：${escapeHtml(question.answer || "暂无")}`;
+        answerPanel.classList.add("show");
+        renderHeader();
+        scheduleSave();
+      });
+
+      const actions = document.createElement("div");
+      actions.className = "self-check-actions";
+      actions.append(revealBtn, rightBtn, wrongBtn);
+      optionArea.appendChild(actions);
+      appendQuestionNavigation(card);
+      return card;
+    }
+
+    if (question.type === "multi") {
+      const checkboxes = [];
+      for (const item of question.options) {
+        const label = document.createElement("label");
+        label.className = "option-btn multi-option";
+        const input = document.createElement("input");
+        input.type = "checkbox";
+        input.value = item.key;
+        const key = document.createElement("strong");
+        key.textContent = item.key;
+        const text = document.createElement("span");
+        appendRichContent(text, item.text);
+        label.append(input, key, text);
+        checkboxes.push(input);
+        optionArea.appendChild(label);
+      }
+
+      const submitBtn = document.createElement("button");
+      submitBtn.type = "button";
+      submitBtn.className = "option-btn";
+      submitBtn.textContent = "提交答案";
+      submitBtn.addEventListener("click", () => {
+        const answer = normalizeOptionAnswer(checkboxes.filter((input) => input.checked).map((input) => input.value).join(""));
+        const result = evaluateMultiAnswer(answer, question.answer);
+        const isCorrect = result.status === "correct";
+        subject.answered.set(question.id, answer);
+        if (isCorrect) {
+          subject.wrongIds.delete(question.id);
+        } else {
+          subject.wrongIds.add(question.id);
+        }
+
+        optionArea.querySelectorAll(".multi-option").forEach((optionLabel) => {
+          const input = optionLabel.querySelector("input");
+          const key = input.value;
+          input.disabled = true;
+          applyMultiAnswerClasses(optionLabel, key, result);
+        });
+        submitBtn.disabled = true;
+        answerPanel.innerHTML = renderMultiAnswerFeedback(result);
+        answerPanel.classList.add("show");
+        renderHeader();
+        scheduleSave();
+      });
+      optionArea.appendChild(submitBtn);
+      appendQuestionNavigation(card);
+      return card;
+    }
 
     for (const item of question.options) {
       const button = document.createElement("button");
@@ -1247,6 +1728,11 @@
       optionArea.appendChild(button);
     }
 
+    appendQuestionNavigation(card);
+    return card;
+  }
+
+  function appendQuestionNavigation(card) {
     const actions = document.createElement("div");
     actions.className = "question-actions";
     const spacer = document.createElement("span");
@@ -1274,7 +1760,6 @@
     nav.append(prevBtn, nextBtn);
     actions.append(spacer, nav);
     card.appendChild(actions);
-    return card;
   }
 
   function renderPreview() {
@@ -1300,7 +1785,7 @@
       const stem = document.createElement("h4");
       appendRichContent(stem, `${index + 1}. ${question.stem}`);
       const options = document.createElement("p");
-      question.options.forEach((item, optionIndex) => {
+      (question.options || []).forEach((item, optionIndex) => {
         if (optionIndex) options.appendChild(document.createTextNode("  "));
         const key = document.createElement("strong");
         key.textContent = `${item.key}. `;
@@ -1315,6 +1800,65 @@
       list.appendChild(card);
     });
     container.appendChild(list);
+  }
+
+  function isSelfCheckedQuestion(question) {
+    return question && (question.type === "blank" || question.type === "short");
+  }
+
+  function evaluateMultiAnswer(selected, correct) {
+    const selectedAnswer = normalizeOptionAnswer(selected);
+    const correctAnswer = normalizeOptionAnswer(correct);
+    const selectedKeys = Array.from(selectedAnswer);
+    const correctKeys = Array.from(correctAnswer);
+    const wrongKeys = selectedKeys.filter((key) => !correctAnswer.includes(key));
+    const missedKeys = correctKeys.filter((key) => !selectedAnswer.includes(key));
+    const pickedCorrectKeys = selectedKeys.filter((key) => correctAnswer.includes(key));
+    let status = "wrong";
+
+    if (!selectedAnswer) {
+      status = "blank";
+    } else if (!wrongKeys.length && !missedKeys.length) {
+      status = "correct";
+    } else if (!wrongKeys.length && pickedCorrectKeys.length && missedKeys.length) {
+      status = "partial";
+    }
+
+    return {
+      status,
+      selected: selectedAnswer,
+      correct: correctAnswer,
+      wrong: wrongKeys.join(""),
+      missed: missedKeys.join(""),
+      pickedCorrect: pickedCorrectKeys.join("")
+    };
+  }
+
+  function applyMultiAnswerClasses(optionElement, key, result) {
+    const selected = result.selected.includes(key);
+    const isCorrectKey = result.correct.includes(key);
+    optionElement.classList.toggle("correct", selected && isCorrectKey);
+    optionElement.classList.toggle("wrong", selected && !isCorrectKey);
+    optionElement.classList.toggle("missed", !selected && isCorrectKey);
+  }
+
+  function renderMultiAnswerFeedback(result) {
+    const answerText = escapeHtml(result.correct);
+    if (result.status === "correct") {
+      return `<strong>回答正确。</strong>答案：${answerText}`;
+    }
+    if (result.status === "partial") {
+      return `<strong>部分正确。</strong>漏选：${escapeHtml(formatAnswerLetters(result.missed))}。正确答案：${answerText}`;
+    }
+    if (result.status === "blank") {
+      return `<strong>未作答。</strong>正确答案：${answerText}`;
+    }
+    const extra = result.missed ? `，漏选：${escapeHtml(formatAnswerLetters(result.missed))}` : "";
+    return `<strong>回答错误。</strong>正确答案：${answerText}${extra}`;
+  }
+
+  function formatAnswerLetters(value) {
+    return Array.from(normalizeOptionAnswer(value)).join("、") || "-";
   }
 
   function createMcuExam(questions) {
@@ -1344,8 +1888,90 @@
       answers: {},
       submitted: false,
       result: null,
-      warnings
+      warnings,
+      title: EXAM_STRATEGY.title,
+      summary: "单片机固定策略：选择题 36 题 54 分（19-27 随机抽 8 个知识点），判断题 16 题 16 分，满分 70 分。",
+      total: EXAM_STRATEGY.total
     };
+  }
+
+  function createGenericExam(questions, counts) {
+    const used = new Set();
+    const items = [];
+    const warnings = [];
+    const sections = [
+      { type: "single", label: "单选题", count: counts.single, points: 1 },
+      { type: "multi", label: "多选题", count: counts.multi, points: 1 },
+      { type: "judge", label: "判断题", count: counts.judge, points: 1 },
+      { type: "blank", label: "填空题", count: counts.blank, points: 0 },
+      { type: "short", label: "简答题", count: counts.short, points: 0 }
+    ].filter((section) => section.count > 0);
+
+    for (const section of sections) {
+      const pool = questions.filter((question) => question.type === section.type);
+      const selected = selectBalancedQuestions(pool, section.count, used);
+      if (selected.length < section.count) {
+        warnings.push(`${section.label}题库不足：需要 ${section.count} 题，实际生成 ${selected.length} 题。`);
+      }
+      selected.forEach((question, index) => {
+        items.push({
+          id: createId(),
+          section: section.label,
+          type: section.type,
+          sectionIndex: index + 1,
+          points: section.points,
+          question
+        });
+      });
+    }
+
+    const total = items.reduce((sum, item) => sum + item.points, 0);
+    return {
+      items,
+      answers: {},
+      submitted: false,
+      result: null,
+      warnings,
+      title: "自定义模拟组卷",
+      summary: "自定义组卷：默认按章节或知识点均分抽题；填空和简答不计分，只展示参考答案。",
+      total
+    };
+  }
+
+  function selectBalancedQuestions(pool, count, used) {
+    const groups = new Map();
+    for (const question of pool) {
+      if (used.has(question.id)) continue;
+      const key = questionGroupKey(question);
+      if (!groups.has(key)) groups.set(key, []);
+      groups.get(key).push(question);
+    }
+
+    let queues = Array.from(groups.values())
+      .map((items) => shuffleArray([...items]))
+      .sort((a, b) => b.length - a.length);
+    const selected = [];
+    while (selected.length < count && queues.length) {
+      const nextQueues = [];
+      for (const queue of queues) {
+        const question = queue.shift();
+        if (question && !used.has(question.id) && selected.length < count) {
+          selected.push(question);
+          used.add(question.id);
+        }
+        if (queue.length) nextQueues.push(queue);
+      }
+      queues = nextQueues;
+    }
+    return selected;
+  }
+
+  function questionGroupKey(question) {
+    if (question.chapter) return `chapter:${question.chapter}`;
+    if (question.knowledgePoint !== null && question.knowledgePoint !== undefined) {
+      return `knowledge:${question.knowledgePoint}`;
+    }
+    return "all";
   }
 
   function selectMcuQuestions(questions, section, used) {
@@ -1398,9 +2024,11 @@
     const warningText = exam.warnings.length
       ? `<p class="exam-warning">${escapeHtml(exam.warnings.join(" "))}</p>`
       : "";
+    const total = exam.total ?? EXAM_STRATEGY.total;
+    const summary = exam.summary || "单片机固定策略：选择题 36 题 54 分（19-27 随机抽 8 个知识点），判断题 16 题 16 分，满分 70 分。";
     const resultText = exam.result
-      ? `<p><strong>得分：${formatScore(exam.result.score)} / ${EXAM_STRATEGY.total}</strong>，已计分 ${formatScore(selectedTotal)} 分。</p>`
-      : `<p>单片机固定策略：选择题 36 题 54 分（19-27 随机抽 8 个知识点），判断题 16 题 16 分，满分 70 分。</p>`;
+      ? `<p><strong>得分：${formatScore(exam.result.score)} / ${formatScore(total)}</strong>，已计分 ${formatScore(selectedTotal)} 分。</p>`
+      : `<p>${escapeHtml(summary)}</p>`;
 
     els.examSummary.innerHTML = `
       ${resultText}
@@ -1412,7 +2040,7 @@
 
     els.examArea.innerHTML = "";
     if (!exam.items.length) {
-      els.examArea.innerHTML = `<div class="blank-message">导入单片机单选和判断题库后，点击“生成模拟卷”。</div>`;
+      els.examArea.innerHTML = `<div class="blank-message">导入题库后，可选择“单片机固定策略”或“自定义模拟组卷”。</div>`;
       return;
     }
 
@@ -1448,18 +2076,42 @@
     const card = document.createElement("article");
     card.className = "question-card exam-card";
     const selected = exam.answers[item.id] || "";
-    const correct = exam.submitted ? isExamAnswerCorrect(item, selected) : false;
+    const multiResult = item.question.type === "multi" ? evaluateMultiAnswer(selected, item.question.answer) : null;
+    const correct = exam.submitted
+      ? (multiResult ? multiResult.status === "correct" : isExamAnswerCorrect(item, selected))
+      : false;
     const meta = document.createElement("div");
     meta.className = "question-meta";
     meta.innerHTML = `
       <span class="type-pill">${escapeHtml(typeLabels[item.type])}</span>
       <span>${escapeHtml(item.section)} ${number}</span>
       <span>${formatScore(item.points)} 分</span>
-      <span>知识点 ${escapeHtml(item.question.knowledgePoint ?? "-")}</span>
+      ${renderQuestionScopeMeta(item.question)}
     `;
     const stem = document.createElement("h3");
     appendRichContent(stem, item.question.stem);
     card.append(meta, stem);
+
+    if (isSelfCheckedQuestion(item.question)) {
+      const input = document.createElement("textarea");
+      input.className = "self-answer-input";
+      input.rows = item.question.type === "short" ? 5 : 2;
+      input.value = selected;
+      input.disabled = exam.submitted;
+      input.placeholder = "可选填写，交卷后显示参考答案。";
+      input.addEventListener("input", () => {
+        state.exam.answers[item.id] = input.value;
+      });
+      card.appendChild(input);
+
+      if (exam.submitted) {
+        const panel = document.createElement("div");
+        panel.className = "answer-panel show";
+        panel.innerHTML = `<strong>参考答案：</strong>${escapeHtml(item.question.answer || "暂无")}`;
+        card.appendChild(panel);
+      }
+      return card;
+    }
 
     const options = document.createElement("div");
     options.className = "options exam-options";
@@ -1467,13 +2119,20 @@
       const label = document.createElement("label");
       label.className = "option-btn exam-option";
       const input = document.createElement("input");
-      input.type = "radio";
+      input.type = item.question.type === "multi" ? "checkbox" : "radio";
       input.name = `exam-${item.id}`;
       input.value = option.key;
-      input.checked = selected === option.key;
+      input.checked = item.question.type === "multi"
+        ? normalizeOptionAnswer(selected).includes(option.key)
+        : selected === option.key;
       input.disabled = exam.submitted;
       input.addEventListener("change", () => {
-        state.exam.answers[item.id] = option.key;
+        if (item.question.type === "multi") {
+          const checked = Array.from(options.querySelectorAll("input:checked")).map((checkbox) => checkbox.value).join("");
+          state.exam.answers[item.id] = normalizeOptionAnswer(checked);
+        } else {
+          state.exam.answers[item.id] = option.key;
+        }
       });
       const key = document.createElement("strong");
       key.textContent = option.key;
@@ -1481,8 +2140,12 @@
       appendRichContent(text, option.text);
       label.append(input, key, text);
       if (exam.submitted) {
-        label.classList.toggle("correct", option.key === item.question.answer);
-        label.classList.toggle("wrong", selected === option.key && !correct);
+        if (multiResult) {
+          applyMultiAnswerClasses(label, option.key, multiResult);
+        } else {
+          label.classList.toggle("correct", option.key === item.question.answer);
+          label.classList.toggle("wrong", input.checked && !correct);
+        }
       }
       options.appendChild(label);
     }
@@ -1491,9 +2154,11 @@
     if (exam.submitted) {
       const panel = document.createElement("div");
       panel.className = "answer-panel show";
-      panel.innerHTML = correct
-        ? `<strong>正确。</strong>答案：${escapeHtml(item.question.answer)}`
-        : `<strong>错误。</strong>正确答案：${escapeHtml(item.question.answer)}`;
+      panel.innerHTML = multiResult
+        ? renderMultiAnswerFeedback(multiResult)
+        : (correct
+          ? `<strong>正确。</strong>答案：${escapeHtml(item.question.answer)}`
+          : `<strong>错误。</strong>正确答案：${escapeHtml(item.question.answer)}`);
       card.appendChild(panel);
     }
 
@@ -1509,6 +2174,7 @@
     const subject = getActiveSubject();
     if (subject) {
       for (const item of exam.items) {
+        if (!item.points || isSelfCheckedQuestion(item.question)) continue;
         if (isExamAnswerCorrect(item, exam.answers[item.id] || "")) {
           subject.wrongIds.delete(item.question.id);
         } else {
@@ -1524,8 +2190,9 @@
   function scoreMcuExam(exam) {
     let score = 0;
     let correctCount = 0;
-    const total = EXAM_STRATEGY.total;
+    const total = exam.total ?? EXAM_STRATEGY.total;
     for (const item of exam.items) {
+      if (!item.points) continue;
       if (isExamAnswerCorrect(item, exam.answers[item.id] || "")) {
         score += item.points;
         correctCount += 1;
@@ -1535,7 +2202,28 @@
   }
 
   function isExamAnswerCorrect(item, answer) {
+    if (isSelfCheckedQuestion(item.question)) return false;
+    if (item.question.type === "multi") return evaluateMultiAnswer(answer, item.question.answer).status === "correct";
     return String(answer) === String(item.question.answer);
+  }
+
+  function renderQuestionScopeMeta(question) {
+    const parts = [];
+    const chapter = normalizeQuestionContext(question && question.chapter ? question.chapter : "");
+    const knowledgePoint = question ? question.knowledgePoint : null;
+    const originNumber = question ? (question.originNumber ?? extractOriginalQuestionNumber(question.raw || "")) : null;
+    const sourceName = String(question && question.sourceName ? question.sourceName : "").trim();
+    const contextLabel = questionContextLabel(chapter);
+    if (chapter) parts.push(`${contextLabel || "来源"} ${chapter}`);
+    if (knowledgePoint !== null && knowledgePoint !== undefined && String(knowledgePoint).trim() !== "") {
+      parts.push(`知识点 ${knowledgePoint}`);
+    }
+    if (originNumber !== null && originNumber !== undefined && String(originNumber).trim() !== "") {
+      parts.push(`原题 ${originNumber}`);
+    }
+    if (sourceName) parts.push(`文件 ${sourceName}`);
+    if (!parts.length) parts.push("来源 -");
+    return parts.map((item) => `<span>${escapeHtml(item)}</span>`).join("");
   }
 
   function formatScore(value) {
@@ -1557,7 +2245,7 @@
     return questions.reduce((acc, question) => {
       if (acc[question.type] !== undefined) acc[question.type] += 1;
       return acc;
-    }, { single: 0, judge: 0 });
+    }, { single: 0, multi: 0, judge: 0, blank: 0, short: 0 });
   }
 
   function logImport(message, kind) {
@@ -1670,6 +2358,7 @@
     module.exports = {
       parseQuestionText,
       normalizeText,
+      assertReadableText,
       parseOptions,
       cleanQuestionStem,
       stripAnswerLeakBeforeOptions,
@@ -1678,6 +2367,8 @@
       hydrateState,
       normalizePracticeProgress,
       createMcuExam,
+      createGenericExam,
+      evaluateMultiAnswer,
       scoreMcuExam
     };
   }
