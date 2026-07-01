@@ -1,5 +1,12 @@
 const assert = require("assert");
-const { parseQuestionText, createGenericExam, scoreMcuExam, assertReadableText, evaluateMultiAnswer } = require("../app.js");
+const {
+  parseQuestionText,
+  createGenericExam,
+  scoreMcuExam,
+  assertReadableText,
+  evaluateMultiAnswer,
+  questionScopeParts
+} = require("../app.js");
 
 const text = [
   "导论",
@@ -23,7 +30,7 @@ const text = [
   "答案：思维",
   "二、简答题",
   "1. 简述实践在认识中的作用。",
-  "答案：实践是认识的来源、动力、目的和检验标准。"
+  "参考答案: 实践是认识的来源、动力、目的和检验标准。"
 ].join("\n");
 
 const questions = parseQuestionText(text, "马克思主义基本原理.docx");
@@ -31,6 +38,11 @@ assert.deepStrictEqual(questions.map((question) => question.type), ["single", "m
 assert.strictEqual(questions[0].answer, "C");
 assert.strictEqual(questions[0].stem, "马克思主义有（ ）个基本组成部分。");
 assert.strictEqual(questions[0].chapter, "导论");
+assert.deepStrictEqual(questionScopeParts(questions[0]), [
+  "章节 导论",
+  "原题 1",
+  "文件 马克思主义基本原理.docx"
+]);
 assert.strictEqual(questions[1].answer, "BCD");
 assert.strictEqual(questions[1].stem, "马克思主义理论体系的三个主要组成部分是（ ）。");
 assert.strictEqual(questions[1].chapter, "导论");
@@ -39,6 +51,19 @@ assert.strictEqual(questions[2].chapter, "导论");
 assert.strictEqual(questions[3].answer, "思维");
 assert.strictEqual(questions[3].chapter, "第一章");
 assert.strictEqual(questions[4].answer, "实践是认识的来源、动力、目的和检验标准。");
+assert(!questions[4].stem.endsWith("参考"));
+
+const correctAnswerLabelQuestions = parseQuestionText(
+  [
+    "一、简答题",
+    "1. 简述劳动二重性。",
+    "正确答案：具体劳动和抽象劳动。"
+  ].join("\n"),
+  "简答题.docx"
+);
+assert.strictEqual(correctAnswerLabelQuestions.length, 1);
+assert.strictEqual(correctAnswerLabelQuestions[0].answer, "具体劳动和抽象劳动。");
+assert(!correctAnswerLabelQuestions[0].stem.endsWith("正确"));
 
 const exam = createGenericExam(questions, { single: 1, multi: 1, judge: 1, blank: 1, short: 1 });
 assert.deepStrictEqual(exam.items.map((item) => item.type), ["single", "multi", "judge", "blank", "short"]);
@@ -88,6 +113,7 @@ assert.strictEqual(scoreMcuExam({
 }).score, 0);
 
 assert.doesNotThrow(() => assertReadableText(text, "马克思主义基本原理.docx"));
+assert.doesNotThrow(() => assertReadableText("Office_ Office_ Office_ 正确答案: 可以识别。", "reference-answer.docx"));
 assert.throws(
   () => assertReadableText("\u35d7\u2de8\u1b13\u228f\u01c9\u071f\u15f1\u040f\u041d\u0dce ".repeat(200), "bad.pdf"),
   /乱码/

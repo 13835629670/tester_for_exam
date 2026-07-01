@@ -783,6 +783,10 @@ textarea:focus {
   line-height: 1.55;
 }
 
+.compact-source span {
+  margin-right: 10px;
+}
+
 .blank-message {
   padding: 26px;
   border: 1px dashed var(--line);

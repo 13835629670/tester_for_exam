@@ -612,7 +612,7 @@
       .slice(0, 8000);
     const badChars = (sample.match(/[�\u0000-\u0008\u000b\u000c\u000e-\u001f]/g) || []).length;
     const cjkChars = (visibleSample.match(/[\u4e00-\u9fa5]/g) || []).length;
-    const answerMarks = (sample.match(/答案：/g) || []).length;
+    const answerMarks = (sample.match(/(?:参考答案|正确答案|答案)\s*[:：]/g) || []).length;
     const embedMarks = (sample.match(/Office_|_123456|Times New Roman|System|MathType/g) || []).length;
     const badRatio = sample ? badChars / sample.length : 1;
     const visibleChars = visibleSample.replace(/\s/g, "").length;
@@ -658,7 +658,7 @@
       .replace(/[□�]{2,}/g, "[公式]")
       .replace(/[□�]/g, "")
       .replace(/[ \t]+/g, " ")
-      .replace(/答案\s*[:：]/g, "答案：");
+      .replace(/(?:参考答案|正确答案|答案)\s*[:：]/g, "答案：");
 
     return withRichTokensProtected(normalized, (value) => value
       .replace(/选项\s*([A-HＡ-Ｈ])\s*[）).．、:：]\s*/g, (_, key) => `${normalizeOptionKey(key)}. `)
@@ -878,7 +878,7 @@
     const chapterBlock = extractBlockChapter(block);
     const blockContent = chapterBlock.content;
     if (isSuspiciousBlock(blockContent)) return null;
-    const answerMatch = blockContent.match(/答案：\s*([\s\S]+)$/);
+    const answerMatch = blockContent.match(/(?:参考答案|正确答案|答案)\s*[:：]\s*([\s\S]+)$/);
     const knowledgePoint = extractKnowledgePoint(blockContent);
     const originNumber = extractOriginalQuestionNumber(blockContent);
     let body = "";
@@ -1795,7 +1795,8 @@
       const answer = document.createElement("p");
       answer.innerHTML = `<strong>答案：</strong>${escapeHtml(question.answer)}`;
       const source = document.createElement("p");
-      source.innerHTML = `<strong>来源：</strong>${escapeHtml(question.sourceName || "导入文件")}`;
+      source.className = "compact-source";
+      source.innerHTML = `<strong>定位：</strong>${renderQuestionScopeMeta(question)}`;
       card.append(type, stem, options, answer, source);
       list.appendChild(card);
     });
@@ -2208,6 +2209,10 @@
   }
 
   function renderQuestionScopeMeta(question) {
+    return questionScopeParts(question).map((item) => `<span>${escapeHtml(item)}</span>`).join("");
+  }
+
+  function questionScopeParts(question) {
     const parts = [];
     const chapter = normalizeQuestionContext(question && question.chapter ? question.chapter : "");
     const knowledgePoint = question ? question.knowledgePoint : null;
@@ -2223,7 +2228,7 @@
     }
     if (sourceName) parts.push(`文件 ${sourceName}`);
     if (!parts.length) parts.push("来源 -");
-    return parts.map((item) => `<span>${escapeHtml(item)}</span>`).join("");
+    return parts;
   }
 
   function formatScore(value) {
@@ -2369,6 +2374,7 @@
       createMcuExam,
       createGenericExam,
       evaluateMultiAnswer,
+      questionScopeParts,
       scoreMcuExam
     };
   }
